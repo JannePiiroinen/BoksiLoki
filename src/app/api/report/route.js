@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/currentUser";
 import { subscriptionRequired } from "@/lib/subscription";
-import { checkAndRecordUsage, releaseUsage } from "@/lib/usageLimit";
+import { checkAndRecordUsage, releaseUsage, recordUsageDetails } from "@/lib/usageLimit";
+import { callClaude, parseClaudeJson, usageDetails, AnthropicError } from "@/lib/anthropic";
 
 const MAX_WORKOUTS_PER_PERIOD = 60;
 
@@ -92,46 +93,29 @@ Vastaa VAIN JSON-muodossa, ei muuta tekstiä, ei markdown-koodilohkoja:
   "suositus": "1-2 konkreettista suositusta seuraavalle jaksolle"
 }`;
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1500,
-        messages: [{ role: "user", content: prompt }],
-      }),
+    const claude = await callClaude({
+      model: "claude-sonnet-4-6",
+      maxTokens: 1500,
+      messages: [{ role: "user", content: prompt }],
     });
-
-    if (!res.ok) {
-      await releaseUsage(usageEventId);
-      const errText = await res.text();
-      return NextResponse.json({ error: "Anthropic API -virhe", detail: errText }, { status: 502 });
-    }
-
-    const data = await res.json();
-    const text = (data.content || [])
-      .map((b) => b.text || "")
-      .join("")
-      .replace(/```json|```/g, "")
-      .trim();
+    await recordUsageDetails(usageEventId, usageDetails(claude));
 
     let report;
     try {
-      report = JSON.parse(text);
+      report = parseClaudeJson(claude.text);
     } catch (parseErr) {
+      console.error("AI palautti virheellistä JSONia (report)", claude.text);
       await releaseUsage(usageEventId);
-      return NextResponse.json(
-        { error: "AI palautti virheellistä JSONia", detail: text },
-        { status: 502 }
-      );
+      return NextResponse.json({ error: "AI palautti virheellisen vastauksen, yritä uudelleen." }, { status: 502 });
     }
     return NextResponse.json({ report: { ...report, currentCount, previousCount } });
   } catch (err) {
     await releaseUsage(usageEventId);
-    return NextResponse.json({ error: "Raportin luonti epäonnistui", detail: String(err) }, { status: 500 });
+    if (err instanceof AnthropicError) {
+      console.error("Anthropic-kutsu epäonnistui (report)", err.status, err.body);
+      return NextResponse.json({ error: "AI-palvelu ei juuri nyt vastaa, yritä hetken päästä uudelleen." }, { status: 502 });
+    }
+    console.error("Raportin luonti epäonnistui", err);
+    return NextResponse.json({ error: "Raportin luonti epäonnistui" }, { status: 500 });
   }
 }

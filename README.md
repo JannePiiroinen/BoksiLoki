@@ -51,14 +51,16 @@ src/app/api/workouts/     - treenilogi (GET/POST/DELETE)
 src/app/api/prs/          - ennätykset
 src/app/api/report/       - AI-kehitysraportti
 src/app/api/usage/        - kuluvan kuukauden AI-käyttö ja rajat (GET)
-src/lib/usageLimit.js     - AI-kutsujen käyttörajat
+src/lib/usageLimit.js     - AI-kutsujen käyttörajat ja käytön kirjaus
+src/lib/anthropic.js      - keskitetty Anthropic-kutsu (tokenit, kustannus, latenssi)
 prisma/schema.prisma      - tietokantamalli
 ```
 
 ## 4. AI-käyttörajat
 
 Jokainen Anthropic-kutsu (WOD, kuvan tulkinta, raportti) kirjataan `UsageEvent`-tauluun, ja kutsu estetään
-HTTP 429:llä, jos jokin raja ylittyy. Epäonnistunut AI-kutsu ei kuluta kiintiötä.
+HTTP 429:llä, jos jokin raja ylittyy. Epäonnistunut AI-kutsu ei kuluta kiintiötä: rivi merkitään
+`refunded`-tilaan, mutta se säilyy kustannusraportissa, koska kutsu on voitu jo laskuttaa.
 
 | Muuttuja | Oletus | Merkitys |
 |---|---|---|
@@ -92,6 +94,15 @@ curl -s localhost:3000/api/usage
 ```
 Kolmannen kutsun pitäisi palauttaa 429. Huom: jos kuluvalla kuulla on jo aiempia WOD-kutsuja, raja tulee
 vastaan aiemmin. Testirivit voi poistaa Prisma Studiosta (`UsageEvent`-taulu).
+
+### Kustannusseuranta
+
+Jokaisesta kutsusta tallennetaan malli, input- ja output-tokenit, kustannus (USD) ja latenssi.
+Kustannus lasketaan muuttujista `PRICE_INPUT_PER_MTOK` ja `PRICE_OUTPUT_PER_MTOK` (USD / miljoona tokenia,
+tarkista Anthropicin hinnastosta). Kuluvan kuukauden yhteenveto per toiminto:
+```bash
+npm run cost:report
+```
 
 ## 5. Puuttuu vielä (seuraavat vaiheet)
 

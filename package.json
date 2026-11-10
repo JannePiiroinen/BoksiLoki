@@ -11,7 +11,8 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
-    "test:usage": "node --no-warnings --env-file=.env.local scripts/test-usage-limit.mjs"
+    "test:usage": "node --no-warnings --env-file=.env.local scripts/test-usage-limit.mjs",
+    "cost:report": "node --no-warnings --env-file=.env.local scripts/cost-report.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

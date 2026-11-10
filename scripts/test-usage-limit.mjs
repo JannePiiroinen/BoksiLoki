@@ -30,7 +30,11 @@ try {
   const photo = await checkAndRecordUsage(user.id, "photo");
   expect("eri laji (photo) ei ole rajoitettu", photo, true);
   await releaseUsage(photo.eventId);
-  console.log(`     photo-käyttö perumisen jälkeen: ${(await getMonthlyUsage(user.id)).photo.used} (odotus 0)`);
+  const photoUsed = (await getMonthlyUsage(user.id)).photo.used;
+  const releasedRow = await prisma.usageEvent.findUnique({ where: { id: photo.eventId } });
+  const releaseOk = photoUsed === 0 && releasedRow?.refunded === true;
+  if (!releaseOk) failures++;
+  console.log(`${releaseOk ? "OK  " : "FAIL"} peruttu kutsu ei kuluta kiintiötä (${photoUsed}) mutta rivi säilyy kustannusraporttia varten`);
 
   const parallel = await Promise.all([checkAndRecordUsage(user.id, "report"), checkAndRecordUsage(user.id, "report")]);
   const okCount = parallel.filter((r) => r.ok).length;

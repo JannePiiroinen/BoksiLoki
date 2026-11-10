@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/currentUser";
 import { subscriptionRequired } from "@/lib/subscription";
-import { checkAndRecordUsage, releaseUsage } from "@/lib/usageLimit";
+import { checkAndRecordUsage, releaseUsage, recordUsageDetails } from "@/lib/usageLimit";
+import { callClaude, parseClaudeJson, usageDetails, AnthropicError } from "@/lib/anthropic";
 
 const ALLOWED_MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_IMAGE_BASE64_LENGTH = 6 * 1024 * 1024;
@@ -48,54 +49,37 @@ Vastaa VAIN JSON-muodossa, ei muuta tekstiä, ei markdown-koodilohkoja:
   "epavarma": true tai false
 }`;
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
-              { type: "text", text: prompt },
-            ],
-          },
-        ],
-      }),
+    const claude = await callClaude({
+      model: "claude-sonnet-4-6",
+      maxTokens: 1000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
     });
-
-    if (!res.ok) {
-      await releaseUsage(usageEventId);
-      const errText = await res.text();
-      return NextResponse.json({ error: "Anthropic API -virhe", detail: errText }, { status: 502 });
-    }
-
-    const data = await res.json();
-    const text = (data.content || [])
-      .map((b) => b.text || "")
-      .join("")
-      .replace(/```json|```/g, "")
-      .trim();
+    await recordUsageDetails(usageEventId, usageDetails(claude));
 
     let wod;
     try {
-      wod = JSON.parse(text);
+      wod = parseClaudeJson(claude.text);
     } catch (parseErr) {
+      console.error("AI palautti virheellistä JSONia (photo)", claude.text);
       await releaseUsage(usageEventId);
-      return NextResponse.json(
-        { error: "AI palautti virheellistä JSONia", detail: text },
-        { status: 502 }
-      );
+      return NextResponse.json({ error: "AI palautti virheellisen vastauksen, yritä uudelleen." }, { status: 502 });
     }
     return NextResponse.json({ wod });
   } catch (err) {
     await releaseUsage(usageEventId);
-    return NextResponse.json({ error: "Kuvan tulkinta epäonnistui", detail: String(err) }, { status: 500 });
+    if (err instanceof AnthropicError) {
+      console.error("Anthropic-kutsu epäonnistui (photo)", err.status, err.body);
+      return NextResponse.json({ error: "AI-palvelu ei juuri nyt vastaa, yritä hetken päästä uudelleen." }, { status: 502 });
+    }
+    console.error("Kuvan tulkinta epäonnistui", err);
+    return NextResponse.json({ error: "Kuvan tulkinta epäonnistui" }, { status: 500 });
   }
 }

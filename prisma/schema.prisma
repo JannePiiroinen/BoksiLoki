@@ -65,13 +65,24 @@ model PersonalRecord {
   @@index([userId, key])
 }
 
-// Yksi rivi per maksullinen AI-kutsu - käytetään kuukausirajoihin, jäähdytykseen ja globaaliin päiväkattoon.
+// Yksi rivi per maksullinen AI-kutsu - käytetään kuukausirajoihin, jäähdytykseen, globaaliin päiväkattoon
+// ja kustannusseurantaan.
 model UsageEvent {
   id        String   @id @default(cuid())
   userId    String
   kind      String   // "wod" | "photo" | "report"
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // true = kutsu epäonnistui eikä kuluta kiintiötä; rivi säilyy, jotta mahdollinen kulu näkyy raportissa
+  refunded  Boolean  @default(false)
+
+  // Anthropic-kutsun tiedot (null vanhoilla riveillä ja jos kutsu ei ehtinyt palauttaa vastausta)
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Decimal? @db.Decimal(10, 6)
+  latencyMs    Int?
 
   @@index([userId, kind, createdAt])
   @@index([createdAt])

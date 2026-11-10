@@ -64,7 +64,7 @@ export async function checkAndRecordUsage(userId, kind) {
     const now = new Date();
 
     const used = await tx.usageEvent.count({
-      where: { userId, kind, createdAt: { gte: startOfMonth(now) } },
+      where: { userId, kind, refunded: false, createdAt: { gte: startOfMonth(now) } },
     });
     if (used >= limit) {
       return {
@@ -75,7 +75,7 @@ export async function checkAndRecordUsage(userId, kind) {
     }
 
     const latest = await tx.usageEvent.findFirst({
-      where: { userId, kind },
+      where: { userId, kind, refunded: false },
       orderBy: { createdAt: "desc" },
       select: { createdAt: true },
     });
@@ -84,7 +84,7 @@ export async function checkAndRecordUsage(userId, kind) {
     }
 
     const globalUsed = await tx.usageEvent.count({
-      where: { createdAt: { gte: new Date(now.getTime() - GLOBAL_WINDOW_MS) } },
+      where: { refunded: false, createdAt: { gte: new Date(now.getTime() - GLOBAL_WINDOW_MS) } },
     });
     if (globalUsed >= globalLimit) {
       return { ok: false, status: 429, message: "Palvelu on tilapäisesti kovassa käytössä, yritä myöhemmin." };
@@ -96,19 +96,34 @@ export async function checkAndRecordUsage(userId, kind) {
 }
 
 // Perutaan kirjattu käyttö, kun Anthropic-kutsu epäonnistui - virhe ei saa kuluttaa kiintiötä.
+// Rivi merkitään palautetuksi eikä sitä poisteta, jotta jo maksettu kutsu näkyy kustannusraportissa.
 export async function releaseUsage(eventId) {
   if (!eventId) return;
   try {
-    await prisma.usageEvent.deleteMany({ where: { id: eventId } });
+    await prisma.usageEvent.updateMany({ where: { id: eventId }, data: { refunded: true } });
   } catch {
     // ei kriittistä - pahimmillaan käyttäjältä kuluu yksi kutsu kiintiöstä
+  }
+}
+
+// Tallentaa onnistuneen (tai maksetun mutta käyttökelvottoman) Anthropic-kutsun tiedot jo luotuun riviin.
+// Virhe vain lokitetaan - kustannusseuranta ei saa kaataa käyttäjän pyyntöä.
+export async function recordUsageDetails(eventId, { model, inputTokens, outputTokens, costUsd, latencyMs }) {
+  if (!eventId) return;
+  try {
+    await prisma.usageEvent.update({
+      where: { id: eventId },
+      data: { model, inputTokens, outputTokens, costUsd, latencyMs },
+    });
+  } catch (err) {
+    console.error("Käyttötietojen tallennus epäonnistui", eventId, err);
   }
 }
 
 export async function getMonthlyUsage(userId) {
   const groups = await prisma.usageEvent.groupBy({
     by: ["kind"],
-    where: { userId, createdAt: { gte: startOfMonth() } },
+    where: { userId, refunded: false, createdAt: { gte: startOfMonth() } },
     _count: { _all: true },
   });
   const counts = Object.fromEntries(groups.map((g) => [g.kind, g._count._all]));
