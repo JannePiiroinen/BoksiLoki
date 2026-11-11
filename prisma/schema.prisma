@@ -1,4 +1,4 @@
-// BoxLog - tietokantaskeema
+// BoksiLoki - tietokantaskeema
 // Vaihe 1: yksinkertainen malli, yksi User per tili, ei vielä salikohtaista jäsenyyttä.
 // Vaihe 2 (kun useita saleja/urheilijoita): lisätään Gym-malli ja Membership-liitostaulu.
 
